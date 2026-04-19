@@ -389,3 +389,91 @@ def test_step5_idempotent_when_pajunwi_already_payment_pending(store, notifier):
     assert store.get_task("t1")["state"] == "PAYMENT_PENDING"
     put_calls = [c for c in resp_lib.calls if c.request.method == "PUT"]
     assert len(put_calls) == 0  # skipped because already PAYMENT_PENDING
+
+
+# ── Step8EvidenceHandler tests ─────────────────────────────────────
+from src.handlers.step8_evidence import Step8EvidenceHandler
+
+
+@resp_lib.activate
+def test_step8_copies_new_comment_to_pycon(store, notifier):
+    """Step 8 copies comments added after last_comment_id."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1/logs",
+        json={"result": [
+            {"id": "c1", "body": {"content": "영수증 첨부"}},
+            {"id": "c2", "body": {"content": "카드 내역 첨부"}},
+        ]},
+    )
+    resp_lib.add(
+        resp_lib.POST,
+        f"{BASE}/projects/{PYCON_PROJECT}/posts/pycon-t1/logs",
+        json={"result": {"id": "c3"}},
+    )
+
+    store.upsert_task("t1", "PAYMENT_PENDING", pycon_task_id="pycon-t1",
+                      last_comment_id=None)
+    dooray = make_dooray_client()
+    handler = Step8EvidenceHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    result = handler.run({
+        "pajunwi_task_id": "t1", "state": "PAYMENT_PENDING",
+        "pycon_task_id": "pycon-t1", "last_comment_id": None,
+    })
+
+    assert result is True
+    task = store.get_task("t1")
+    assert task["state"] == "EVIDENCE_COPIED"
+    assert task["last_comment_id"] == "c2"  # last copied comment
+
+
+@resp_lib.activate
+def test_step8_skips_already_copied_comments(store, notifier):
+    """Comments with id <= last_comment_id are not re-copied."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1/logs",
+        json={"result": [
+            {"id": "c1", "body": {"content": "이전 코멘트"}},
+            {"id": "c2", "body": {"content": "새 코멘트"}},
+        ]},
+    )
+    resp_lib.add(
+        resp_lib.POST,
+        f"{BASE}/projects/{PYCON_PROJECT}/posts/pycon-t1/logs",
+        json={"result": {"id": "c3"}},
+    )
+
+    store.upsert_task("t1", "PAYMENT_PENDING", pycon_task_id="pycon-t1",
+                      last_comment_id="c1")
+    dooray = make_dooray_client()
+    handler = Step8EvidenceHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    handler.run({
+        "pajunwi_task_id": "t1", "state": "PAYMENT_PENDING",
+        "pycon_task_id": "pycon-t1", "last_comment_id": "c1",
+    })
+
+    post_calls = [c for c in resp_lib.calls if c.request.method == "POST"]
+    assert len(post_calls) == 1  # only c2 was copied
+
+
+@resp_lib.activate
+def test_step8_returns_none_when_no_new_comments(store, notifier):
+    """No new comments → return None (not ready), no state change."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1/logs",
+        json={"result": [{"id": "c1", "body": {"content": "old"}}]},
+    )
+
+    store.upsert_task("t1", "PAYMENT_PENDING", pycon_task_id="pycon-t1",
+                      last_comment_id="c1")
+    dooray = make_dooray_client()
+    handler = Step8EvidenceHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    result = handler.run({
+        "pajunwi_task_id": "t1", "state": "PAYMENT_PENDING",
+        "pycon_task_id": "pycon-t1", "last_comment_id": "c1",
+    })
+
+    assert result is False
+    assert store.get_task("t1")["state"] == "PAYMENT_PENDING"
