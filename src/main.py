@@ -1,7 +1,7 @@
 import logging
 import schedule
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 
 from .config import Config
 from .store import Store
@@ -22,6 +22,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Module-level: schedule library doesn't pass return values between jobs;
+# single-threaded, so no concurrency concern.
 _last_poll_time: str = "never"
 
 
@@ -67,7 +69,7 @@ def discover_new_tasks(cfg: Config, store: Store, dooray: DoorayClient) -> int:
 def run_poll(cfg: Config, store: Store, notifier: Notifier, engine: StateEngine,
              dooray: DoorayClient) -> None:
     global _last_poll_time
-    _last_poll_time = datetime.utcnow().isoformat()
+    _last_poll_time = datetime.now(UTC).isoformat()
     logger.info("Poll cycle started")
 
     discovered = discover_new_tasks(cfg, store, dooray)
