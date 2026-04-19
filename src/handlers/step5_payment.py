@@ -32,13 +32,18 @@ class Step5PaymentHandler(BaseHandler):
         dooray_status = pycon_task.get("workflowClass")
 
         if dooray_status == DOORAY_STATUS_REJECTED:
-            # Special path: set REJECTED directly, bypass normal transition
+            # REJECTED uses a special bypass: execute() sets state directly and returns None
+            # so BaseHandler does NOT apply the normal COPIED_TO_PYCON→PAYMENT_PENDING transition.
+            # This is safe because:
+            #   1. BaseHandler returns immediately on None (no retry)
+            #   2. StateEngine only dispatches handlers for tasks in from_state (COPIED_TO_PYCON)
+            #      so a REJECTED task is never picked up again
             self.store.upsert_task(pajunwi_task_id, "REJECTED")
             self.store.log_transition(
                 pajunwi_task_id, "COPIED_TO_PYCON", "REJECTED", self.name, True
             )
             self.notifier.task_rejected(pycon_task_id)
-            return None  # prevents base handler from applying another transition
+            return None
 
         if dooray_status != DOORAY_STATUS_PAYMENT_PENDING:
             return None  # still in review, not ready

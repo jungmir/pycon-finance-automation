@@ -362,3 +362,30 @@ def test_step5_sets_rejected_and_notifies(store, notifier):
 
     assert store.get_task("t1")["state"] == "REJECTED"
     notifier.task_rejected.assert_called_once_with("pycon-t1")
+
+
+@resp_lib.activate
+def test_step5_idempotent_when_pajunwi_already_payment_pending(store, notifier):
+    """If pajunwi is already PAYMENT_PENDING, skip the PUT and still return True."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PYCON_PROJECT}/posts/pycon-t1",
+        json={"result": {"id": "pycon-t1", "workflowClass": DOORAY_STATUS_PAYMENT_PENDING}},
+    )
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1",
+        json={"result": {"id": "t1", "workflowClass": DOORAY_STATUS_PAYMENT_PENDING}},
+    )
+
+    store.upsert_task("t1", "COPIED_TO_PYCON", pycon_task_id="pycon-t1")
+    dooray = make_dooray_client()
+    handler = Step5PaymentHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    result = handler.run({
+        "pajunwi_task_id": "t1", "state": "COPIED_TO_PYCON", "pycon_task_id": "pycon-t1"
+    })
+
+    assert result is True
+    assert store.get_task("t1")["state"] == "PAYMENT_PENDING"
+    put_calls = [c for c in resp_lib.calls if c.request.method == "PUT"]
+    assert len(put_calls) == 0  # skipped because already PAYMENT_PENDING
