@@ -18,6 +18,8 @@ COMMENT_ID_FIELD = "id"       # SPIKE_REQUIRED: "id" or "logId"?
 
 
 class DoorayClient:
+    """REST client for Dooray task management API with automatic retry."""
+
     def __init__(self, domain: str, token: str):
         self._base_url = f"https://{domain}/common/v1"
         self._session = requests.Session()
@@ -34,7 +36,10 @@ class DoorayClient:
             try:
                 resp = self._session.request(method, url, timeout=30, **kwargs)
                 resp.raise_for_status()
-                return resp.json()
+                try:
+                    return resp.json()
+                except ValueError as e:
+                    raise requests.RequestException(f"Failed to parse JSON: {e}") from e
             except requests.RequestException as exc:
                 last_exc = exc
                 logger.warning(f"Dooray request attempt {attempt+1}/3 failed: {exc}")
