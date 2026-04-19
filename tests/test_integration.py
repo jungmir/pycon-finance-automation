@@ -118,14 +118,32 @@ def test_full_flow_new_to_sheet_updated(store, notifier, dooray, mock_sheet):
         store.upsert_task(PAJUNWI_TASK_ID, "NEW")
         engine = build_engine(store, notifier, dooray, sheets)
 
-        # --- Run all steps in one process() call ---
+        # --- Step 2: NEW → REVIEWING ---
         engine.process()
-
-        # --- Verify final state and key data points ---
-        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "SHEET_UPDATED"
+        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "REVIEWING"
         assert store.get_task(PAJUNWI_TASK_ID)["amount"] == 50000
+
+        # --- Step 3: REVIEWING → COPIED_TO_PYCON ---
+        engine.process()
+        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "COPIED_TO_PYCON"
         assert store.get_task(PAJUNWI_TASK_ID)["pycon_task_id"] == PYCON_TASK_ID
+
+        # --- Step 5: COPIED_TO_PYCON → PAYMENT_PENDING ---
+        engine.process()
+        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "PAYMENT_PENDING"
+
+        # --- Step 8: PAYMENT_PENDING → EVIDENCE_COPIED ---
+        engine.process()
+        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "EVIDENCE_COPIED"
         assert store.get_task(PAJUNWI_TASK_ID)["last_comment_id"] == COMMENT_ID
+
+        # --- Step 10: EVIDENCE_COPIED → COMPLETED ---
+        engine.process()
+        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "COMPLETED"
+
+        # --- Step 11: COMPLETED → SHEET_UPDATED ---
+        engine.process()
+        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "SHEET_UPDATED"
 
         # Verify Google Sheets was updated
         mock_ws.append_row.assert_called_once()
@@ -153,7 +171,9 @@ def test_rejected_flow_stops_at_step5(store, notifier, dooray, mock_sheet):
         store.upsert_task(PAJUNWI_TASK_ID, "NEW")
         engine = build_engine(store, notifier, dooray, sheets)
 
-        engine.process()  # NEW → REVIEWING → COPIED_TO_PYCON → REJECTED
+        engine.process()  # NEW → REVIEWING
+        engine.process()  # REVIEWING → COPIED_TO_PYCON
+        engine.process()  # COPIED_TO_PYCON → REJECTED
 
         assert store.get_task(PAJUNWI_TASK_ID)["state"] == "REJECTED"
         notifier.task_rejected.assert_called_once_with(PYCON_TASK_ID)

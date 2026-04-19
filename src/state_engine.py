@@ -18,8 +18,11 @@ class StateEngine:
     def process(self) -> int:
         """Run one polling cycle. Returns count of successful state transitions."""
         successful = 0
+        # Snapshot tasks per state at the START of the cycle to prevent cascade
+        # Tasks that just transitioned in this cycle won't be picked up by later handlers
+        state_snapshot = {state: self.store.get_tasks_in_state(state) for state in self.handlers}
         for state, handler in self.handlers.items():
-            tasks = self.store.get_tasks_in_state(state)
+            tasks = state_snapshot[state]
             for task in tasks:
                 try:
                     if handler.run(task):
