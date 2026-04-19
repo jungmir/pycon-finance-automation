@@ -1,0 +1,110 @@
+import logging
+import schedule
+import time
+from datetime import datetime
+
+from .config import Config
+from .store import Store
+from .notifier import Notifier
+from .clients.dooray import DoorayClient, DOORAY_STATUS_NEW
+from .clients.sheets import SheetsClient
+from .state_engine import StateEngine
+from .handlers.step2_review import Step2ReviewHandler
+from .handlers.step3_copy import Step3CopyHandler
+from .handlers.step5_payment import Step5PaymentHandler
+from .handlers.step8_evidence import Step8EvidenceHandler
+from .handlers.step10_sync import Step10SyncHandler
+from .handlers.step11_sheets import Step11SheetsHandler
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+_last_poll_time: str = "never"
+
+
+def build_engine(cfg: Config, store: Store, notifier: Notifier) -> StateEngine:
+    dooray = DoorayClient(cfg.dooray_domain, cfg.dooray_api_token)
+    sheets = SheetsClient(cfg.google_service_account_json, cfg.spreadsheet_id)
+
+    handlers = {
+        "NEW": Step2ReviewHandler(store, notifier, dooray, cfg.pajunwi_project_id),
+        "REVIEWING": Step3CopyHandler(
+            store, notifier, dooray, cfg.pajunwi_project_id, cfg.pycon_project_id
+        ),
+        "COPIED_TO_PYCON": Step5PaymentHandler(
+            store, notifier, dooray, cfg.pajunwi_project_id, cfg.pycon_project_id
+        ),
+        "PAYMENT_PENDING": Step8EvidenceHandler(
+            store, notifier, dooray, cfg.pajunwi_project_id, cfg.pycon_project_id
+        ),
+        "EVIDENCE_COPIED": Step10SyncHandler(
+            store, notifier, dooray, cfg.pajunwi_project_id, cfg.pycon_project_id
+        ),
+        "COMPLETED": Step11SheetsHandler(store, notifier, sheets),
+    }
+    return StateEngine(handlers, store)
+
+
+def discover_new_tasks(cfg: Config, store: Store, dooray: DoorayClient) -> int:
+    """Pull tasks in NEW state from Dooray that aren't yet tracked in SQLite."""
+    discovered = 0
+    try:
+        tasks = dooray.get_tasks(cfg.pajunwi_project_id, status=DOORAY_STATUS_NEW)
+        for task in tasks:
+            task_id = task.get("id") or task.get("postId")
+            if task_id and store.get_task(task_id) is None:
+                store.upsert_task(task_id, "NEW")
+                logger.info(f"Discovered new task: {task_id}")
+                discovered += 1
+    except Exception as exc:
+        logger.error(f"Failed to discover new tasks: {exc}")
+    return discovered
+
+
+def run_poll(cfg: Config, store: Store, notifier: Notifier, engine: StateEngine,
+             dooray: DoorayClient) -> None:
+    global _last_poll_time
+    _last_poll_time = datetime.utcnow().isoformat()
+    logger.info("Poll cycle started")
+
+    discovered = discover_new_tasks(cfg, store, dooray)
+    if discovered:
+        logger.info(f"Discovered {discovered} new task(s)")
+
+    transitions = engine.process()
+    logger.info(f"Poll cycle complete: {transitions} transition(s)")
+
+
+def send_heartbeat(store: Store, notifier: Notifier) -> None:
+    active = store.count_active_tasks()
+    transitions = store.count_transitions_today()
+    notifier.heartbeat(active, transitions, _last_poll_time)
+
+
+def main() -> None:
+    cfg = Config.from_env()  # fail-fast if env vars missing
+    store = Store(cfg.database_path)
+    notifier = Notifier(cfg.slack_webhook_url)
+    dooray = DoorayClient(cfg.dooray_domain, cfg.dooray_api_token)
+    engine = build_engine(cfg, store, notifier)
+
+    logger.info("Finance automation started")
+
+    schedule.every(cfg.poll_interval_seconds).seconds.do(
+        run_poll, cfg, store, notifier, engine, dooray
+    )
+    schedule.every().day.at("09:00").do(send_heartbeat, store, notifier)
+
+    # Run once immediately on startup
+    run_poll(cfg, store, notifier, engine, dooray)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(10)
+
+
+if __name__ == "__main__":
+    main()
