@@ -8,6 +8,9 @@ class StateEngine:
         """
         handlers: maps state string → handler instance
         e.g., {"NEW": step2_handler, "REVIEWING": step3_handler, ...}
+        Each handler must have:
+          - .name (str): identifier for logging
+          - .run(task: dict) -> bool: True if transition succeeded, False/None to skip
         """
         self.handlers = handlers
         self.store = store
@@ -24,6 +27,6 @@ class StateEngine:
                 except Exception as exc:
                     logger.error(
                         f"[StateEngine] unexpected error in {handler.name} "
-                        f"for task {task.get('pajunwi_task_id')}: {exc}"
+                        f"(state: {state}) for task {task.get('pajunwi_task_id')}: {exc}"
                     )
         return successful
