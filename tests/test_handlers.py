@@ -264,3 +264,26 @@ def test_step3_idempotent_when_pycon_task_already_exists(store, notifier):
 
     assert result is True
     assert len(resp_lib.calls) == 0  # no API calls made
+
+
+@resp_lib.activate
+def test_step3_copy_raises_on_missing_id(store, notifier):
+    """Step 3 raises ValueError when create_task response has neither id nor postId."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/task-1",
+        json={"result": {"subject": "비품 구매", "body": {"content": "금액: 50,000원"}}},
+    )
+    resp_lib.add(
+        resp_lib.POST,
+        f"{BASE}/projects/{PYCON_PROJECT}/posts",
+        json={"result": {}},  # no id or postId
+    )
+
+    store.upsert_task("task-1", "REVIEWING")
+    dooray = make_dooray_client()
+    handler = Step3CopyHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    task = store.get_task("task-1")
+
+    with pytest.raises(ValueError, match="missing both"):
+        handler.execute(task)

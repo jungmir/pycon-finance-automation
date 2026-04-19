@@ -23,7 +23,9 @@ class Step3CopyHandler(BaseHandler):
     def execute(self, task: dict) -> dict:
         pajunwi_task_id = task["pajunwi_task_id"]
 
-        # Idempotency: if already copied, skip API call
+        # Cross-project copy: we cannot query pycon portal by pajunwi task ID.
+        # Idempotency relies on pycon_task_id being persisted in SQLite after first successful copy.
+        # SPIKE_REQUIRED: verify if pycon portal supports querying tasks by external reference.
         if task.get("pycon_task_id"):
             return {"pycon_task_id": task["pycon_task_id"]}
 
@@ -39,6 +41,8 @@ class Step3CopyHandler(BaseHandler):
             body=body_content,
         )
         pycon_task_id = new_task.get("id") or new_task.get("postId")
+        if not pycon_task_id:
+            raise ValueError("create_task response missing both 'id' and 'postId' fields")
 
         self.notifier.task_copied(pajunwi_task_id, subject)
         return {"pycon_task_id": pycon_task_id}
