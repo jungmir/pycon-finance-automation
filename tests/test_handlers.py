@@ -490,3 +490,58 @@ def test_step8_raises_when_last_comment_not_found(store, notifier):
     handler = Step8EvidenceHandler(store, notifier, make_dooray_client(), PAJUNWI_PROJECT, PYCON_PROJECT)
     with pytest.raises(ValueError, match="not found"):
         handler.execute(store.get_task("t1"))
+
+
+# ── Step10SyncHandler tests ─────────────────────────────────────
+from src.handlers.step10_sync import Step10SyncHandler
+from src.clients.dooray import DOORAY_STATUS_COMPLETED
+
+
+@resp_lib.activate
+def test_step10_transitions_when_pycon_completed(store, notifier):
+    """If pycon task is COMPLETED, update pajunwi and set COMPLETED."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PYCON_PROJECT}/posts/pycon-t1",
+        json={"result": {"id": "pycon-t1", "workflowClass": DOORAY_STATUS_COMPLETED}},
+    )
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1",
+        json={"result": {"id": "t1", "workflowClass": "working"}},
+    )
+    resp_lib.add(
+        resp_lib.PUT,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1",
+        json={"result": {}},
+    )
+
+    store.upsert_task("t1", "EVIDENCE_COPIED", pycon_task_id="pycon-t1")
+    dooray = make_dooray_client()
+    handler = Step10SyncHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    result = handler.run({
+        "pajunwi_task_id": "t1", "state": "EVIDENCE_COPIED", "pycon_task_id": "pycon-t1"
+    })
+
+    assert result is True
+    assert store.get_task("t1")["state"] == "COMPLETED"
+
+
+@resp_lib.activate
+def test_step10_returns_none_when_not_yet_approved(store, notifier):
+    """If pycon task is not yet COMPLETED, return None."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PYCON_PROJECT}/posts/pycon-t1",
+        json={"result": {"id": "pycon-t1", "workflowClass": "working"}},
+    )
+
+    store.upsert_task("t1", "EVIDENCE_COPIED", pycon_task_id="pycon-t1")
+    dooray = make_dooray_client()
+    handler = Step10SyncHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    result = handler.run({
+        "pajunwi_task_id": "t1", "state": "EVIDENCE_COPIED", "pycon_task_id": "pycon-t1"
+    })
+
+    assert result is False
+    assert store.get_task("t1")["state"] == "EVIDENCE_COPIED"
