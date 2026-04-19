@@ -477,3 +477,16 @@ def test_step8_returns_none_when_no_new_comments(store, notifier):
 
     assert result is False
     assert store.get_task("t1")["state"] == "PAYMENT_PENDING"
+
+
+@resp_lib.activate
+def test_step8_raises_when_last_comment_not_found(store, notifier):
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1/logs",
+        json={"result": [{"id": "c3", "body": {"content": "newer comment"}}]},
+    )
+    store.upsert_task("t1", "PAYMENT_PENDING", pycon_task_id="pycon-t1", last_comment_id="c1")
+    handler = Step8EvidenceHandler(store, notifier, make_dooray_client(), PAJUNWI_PROJECT, PYCON_PROJECT)
+    with pytest.raises(ValueError, match="not found"):
+        handler.execute(store.get_task("t1"))

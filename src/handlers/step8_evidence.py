@@ -41,11 +41,9 @@ class Step8EvidenceHandler(BaseHandler):
     def _filter_new(self, comments: list[dict], last_id: str | None) -> list[dict]:
         if not last_id:
             return comments
-        found = False
-        result = []
-        for comment in comments:
-            if found:
-                result.append(comment)
+        for idx, comment in enumerate(comments):
             if comment["id"] == last_id:
-                found = True
-        return result
+                return comments[idx + 1:]
+        raise ValueError(
+            f"Last copied comment '{last_id}' not found in comments list; it may have been deleted"
+        )
