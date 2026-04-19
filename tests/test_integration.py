@@ -16,6 +16,7 @@ from src.clients.dooray import (
     DOORAY_STATUS_REVIEWING,
     DOORAY_STATUS_PAYMENT_PENDING,
     DOORAY_STATUS_COMPLETED,
+    DOORAY_STATUS_REJECTED,
 )
 from src.clients.sheets import SheetsClient
 from src.state_engine import StateEngine
@@ -167,7 +168,6 @@ def test_rejected_flow_stops_at_step5(store, notifier, dooray, mock_sheet):
         rsps.add(resp_lib.GET, f"{BASE}/projects/{PYCON}/posts/{PYCON_TASK_ID}",
                  json={"result": {"id": PYCON_TASK_ID, "workflowClass": "closed"}})
 
-        from src.clients.dooray import DOORAY_STATUS_REJECTED
         store.upsert_task(PAJUNWI_TASK_ID, "NEW")
         engine = build_engine(store, notifier, dooray, sheets)
 
