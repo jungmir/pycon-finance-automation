@@ -113,3 +113,83 @@ def test_execute_with_retry_retries_on_exception(store, notifier):
         result = handler.run(store.get_task("task-1"))
     assert result is True
     assert call_count == 3
+
+
+# Step 2 tests
+
+import responses as resp_lib
+from src.handlers.step2_review import Step2ReviewHandler
+from src.clients.dooray import DOORAY_STATUS_REVIEWING
+
+PAJUNWI_PROJECT = "pajunwi-proj"
+BASE = "https://test.dooray.com/common/v1"
+
+
+def make_dooray_client(domain="test.dooray.com", token="tok"):
+    from src.clients.dooray import DoorayClient
+    return DoorayClient(domain, token)
+
+
+@resp_lib.activate
+def test_step2_transitions_to_reviewing(store, notifier):
+    """Step 2 calls Dooray to change status, stores REVIEWING + amount."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1",
+        json={"result": {
+            "id": "t1",
+            "workflowClass": "registered",  # current: NEW
+            "body": {"content": "금액: 50,000원\n출장비 신청"},
+        }},
+    )
+    resp_lib.add(
+        resp_lib.PUT,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1",
+        json={"result": {}},
+    )
+
+    store.upsert_task("t1", "NEW")
+    dooray = make_dooray_client()
+    handler = Step2ReviewHandler(store, notifier, dooray, PAJUNWI_PROJECT)
+    result = handler.run({"pajunwi_task_id": "t1", "state": "NEW"})
+
+    assert result is True
+    task = store.get_task("t1")
+    assert task["state"] == "REVIEWING"
+    assert task["amount"] == 50000
+
+
+@resp_lib.activate
+def test_step2_idempotent_when_already_reviewing(store, notifier):
+    """If Dooray already shows REVIEWING, skip the PUT and still return True."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1",
+        json={"result": {
+            "id": "t1",
+            "workflowClass": DOORAY_STATUS_REVIEWING,
+            "body": {"content": "금액: 30,000원"},
+        }},
+    )
+
+    store.upsert_task("t1", "NEW")
+    dooray = make_dooray_client()
+    handler = Step2ReviewHandler(store, notifier, dooray, PAJUNWI_PROJECT)
+    result = handler.run({"pajunwi_task_id": "t1", "state": "NEW"})
+
+    assert result is True
+    assert len([c for c in resp_lib.calls if c.request.method == "PUT"]) == 0
+
+
+def test_step2_parse_amount_with_comma():
+    from unittest.mock import MagicMock
+    dooray = make_dooray_client()
+    handler = Step2ReviewHandler(MagicMock(), MagicMock(), dooray, "proj")
+    assert handler._parse_amount("금액: 1,234,567원") == 1234567
+
+
+def test_step2_parse_amount_no_match_returns_zero():
+    from unittest.mock import MagicMock
+    dooray = make_dooray_client()
+    handler = Step2ReviewHandler(MagicMock(), MagicMock(), dooray, "proj")
+    assert handler._parse_amount("내용 없음") == 0
