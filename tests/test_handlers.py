@@ -545,3 +545,50 @@ def test_step10_returns_none_when_not_yet_approved(store, notifier):
 
     assert result is False
     assert store.get_task("t1")["state"] == "EVIDENCE_COPIED"
+
+
+# ── Step11SheetsHandler tests ─────────────────────────────────────
+from src.handlers.step11_sheets import Step11SheetsHandler
+
+
+@patch("src.clients.sheets.gspread.service_account_from_dict")
+def test_step11_appends_row_to_sheet(mock_sa, store, notifier):
+    """Step 11 appends a ledger row and transitions to SHEET_UPDATED."""
+    mock_worksheet = MagicMock()
+    mock_sa.return_value.open_by_key.return_value.sheet1 = mock_worksheet
+
+    from src.clients.sheets import SheetsClient
+    import base64, json as _json
+    sa_b64 = base64.b64encode(_json.dumps({"type": "service_account"}).encode()).decode()
+    sheets = SheetsClient(sa_b64, "sheet1")
+
+    store.upsert_task("t1", "COMPLETED", amount=75000)
+    handler = Step11SheetsHandler(store, notifier, sheets)
+    result = handler.run({"pajunwi_task_id": "t1", "state": "COMPLETED", "amount": 75000})
+
+    assert result is True
+    assert store.get_task("t1")["state"] == "SHEET_UPDATED"
+    mock_worksheet.append_row.assert_called_once()
+    row = mock_worksheet.append_row.call_args[0][0]
+    assert 75000 in row
+
+
+@patch("src.clients.sheets.gspread.service_account_from_dict")
+def test_step11_sheets_failure_notifies_but_does_not_crash(mock_sa, store, notifier):
+    """Google Sheets error → Slack alert, state remains COMPLETED for retry."""
+    mock_worksheet = MagicMock()
+    mock_worksheet.append_row.side_effect = Exception("Quota exceeded")
+    mock_sa.return_value.open_by_key.return_value.sheet1 = mock_worksheet
+
+    from src.clients.sheets import SheetsClient
+    import base64, json as _json
+    sa_b64 = base64.b64encode(_json.dumps({"type": "service_account"}).encode()).decode()
+    sheets = SheetsClient(sa_b64, "sheet1")
+
+    store.upsert_task("t1", "COMPLETED", amount=50000)
+    handler = Step11SheetsHandler(store, notifier, sheets)
+    result = handler.run({"pajunwi_task_id": "t1", "state": "COMPLETED", "amount": 50000})
+
+    assert result is False
+    assert store.get_task("t1")["state"] == "COMPLETED"  # not changed
+    notifier.handler_error.assert_called_once()
