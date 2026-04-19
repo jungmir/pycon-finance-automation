@@ -287,3 +287,78 @@ def test_step3_copy_raises_on_missing_id(store, notifier):
 
     with pytest.raises(ValueError, match="missing both"):
         handler.execute(task)
+
+
+# ── Step5PaymentHandler tests ──────────────────────────────────────
+from src.handlers.step5_payment import Step5PaymentHandler
+from src.clients.dooray import DOORAY_STATUS_PAYMENT_PENDING, DOORAY_STATUS_REJECTED
+
+
+@resp_lib.activate
+def test_step5_transitions_to_payment_pending(store, notifier):
+    """If pycon task shows 결제대기, sync pajunwi and set PAYMENT_PENDING."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PYCON_PROJECT}/posts/pycon-t1",
+        json={"result": {"id": "pycon-t1", "workflowClass": DOORAY_STATUS_PAYMENT_PENDING}},
+    )
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1",
+        json={"result": {"id": "t1", "workflowClass": "working"}},
+    )
+    resp_lib.add(
+        resp_lib.PUT,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1",
+        json={"result": {}},
+    )
+
+    store.upsert_task("t1", "COPIED_TO_PYCON", pycon_task_id="pycon-t1")
+    dooray = make_dooray_client()
+    handler = Step5PaymentHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    result = handler.run({
+        "pajunwi_task_id": "t1", "state": "COPIED_TO_PYCON", "pycon_task_id": "pycon-t1"
+    })
+
+    assert result is True
+    assert store.get_task("t1")["state"] == "PAYMENT_PENDING"
+
+
+@resp_lib.activate
+def test_step5_returns_none_when_still_reviewing(store, notifier):
+    """If pycon task is still in review, return None (not ready yet)."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PYCON_PROJECT}/posts/pycon-t1",
+        json={"result": {"id": "pycon-t1", "workflowClass": "working"}},
+    )
+
+    store.upsert_task("t1", "COPIED_TO_PYCON", pycon_task_id="pycon-t1")
+    dooray = make_dooray_client()
+    handler = Step5PaymentHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    result = handler.run({
+        "pajunwi_task_id": "t1", "state": "COPIED_TO_PYCON", "pycon_task_id": "pycon-t1"
+    })
+
+    assert result is False
+    assert store.get_task("t1")["state"] == "COPIED_TO_PYCON"  # unchanged
+
+
+@resp_lib.activate
+def test_step5_sets_rejected_and_notifies(store, notifier):
+    """If pycon task is rejected, set REJECTED state and send Slack alert."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PYCON_PROJECT}/posts/pycon-t1",
+        json={"result": {"id": "pycon-t1", "workflowClass": DOORAY_STATUS_REJECTED}},
+    )
+
+    store.upsert_task("t1", "COPIED_TO_PYCON", pycon_task_id="pycon-t1")
+    dooray = make_dooray_client()
+    handler = Step5PaymentHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    handler.run({
+        "pajunwi_task_id": "t1", "state": "COPIED_TO_PYCON", "pycon_task_id": "pycon-t1"
+    })
+
+    assert store.get_task("t1")["state"] == "REJECTED"
+    notifier.task_rejected.assert_called_once_with("pycon-t1")
