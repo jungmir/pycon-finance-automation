@@ -193,3 +193,74 @@ def test_step2_parse_amount_no_match_returns_zero():
     dooray = make_dooray_client()
     handler = Step2ReviewHandler(MagicMock(), MagicMock(), dooray, "proj")
     assert handler._parse_amount("내용 없음") == 0
+
+
+# Step 3 tests
+
+from src.handlers.step3_copy import Step3CopyHandler
+
+PYCON_PROJECT = "pycon-proj"
+
+
+@resp_lib.activate
+def test_step3_copies_task_to_pycon(store, notifier):
+    """Step 3 creates a task in the pycon portal and stores pycon_task_id."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t1",
+        json={"result": {
+            "id": "t1",
+            "subject": "출장비 신청",
+            "body": {"content": "금액: 50,000원"},
+        }},
+    )
+    resp_lib.add(
+        resp_lib.POST,
+        f"{BASE}/projects/{PYCON_PROJECT}/posts",
+        json={"result": {"id": "pycon-t1"}},
+    )
+
+    store.upsert_task("t1", "REVIEWING")
+    dooray = make_dooray_client()
+    handler = Step3CopyHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    result = handler.run({"pajunwi_task_id": "t1", "state": "REVIEWING"})
+
+    assert result is True
+    task = store.get_task("t1")
+    assert task["state"] == "COPIED_TO_PYCON"
+    assert task["pycon_task_id"] == "pycon-t1"
+
+
+@resp_lib.activate
+def test_step3_notifies_on_copy(store, notifier):
+    """Step 3 sends a Slack success notification after copying."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/projects/{PAJUNWI_PROJECT}/posts/t2",
+        json={"result": {"id": "t2", "subject": "교통비", "body": {"content": ""}}},
+    )
+    resp_lib.add(
+        resp_lib.POST,
+        f"{BASE}/projects/{PYCON_PROJECT}/posts",
+        json={"result": {"id": "pycon-t2"}},
+    )
+
+    store.upsert_task("t2", "REVIEWING")
+    dooray = make_dooray_client()
+    handler = Step3CopyHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    handler.run({"pajunwi_task_id": "t2", "state": "REVIEWING"})
+
+    notifier.task_copied.assert_called_once_with("t2", "교통비")
+
+
+@resp_lib.activate
+def test_step3_idempotent_when_pycon_task_already_exists(store, notifier):
+    """If pycon_task_id is already set in store, skip POST and return True."""
+    store.upsert_task("t1", "REVIEWING", pycon_task_id="existing-pycon-t1")
+    dooray = make_dooray_client()
+    handler = Step3CopyHandler(store, notifier, dooray, PAJUNWI_PROJECT, PYCON_PROJECT)
+    result = handler.run({"pajunwi_task_id": "t1", "state": "REVIEWING",
+                          "pycon_task_id": "existing-pycon-t1"})
+
+    assert result is True
+    assert len(resp_lib.calls) == 0  # no API calls made
