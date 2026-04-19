@@ -67,3 +67,10 @@ def test_count_active_tasks(store):
 
 def test_get_task_returns_none_for_unknown(store):
     assert store.get_task("nonexistent") is None
+
+
+def test_count_transitions_today(store):
+    store.upsert_task("t1", "NEW")
+    store.log_transition("t1", "NEW", "REVIEWING", "handler", success=True)
+    store.log_transition("t1", "REVIEWING", "COPIED_TO_PYCON", "handler", success=False)
+    assert store.count_transitions_today() == 1

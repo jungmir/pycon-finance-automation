@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, UTC, timedelta
 from typing import Optional
 
 
@@ -35,7 +35,7 @@ class Store:
         self._conn.commit()
 
     def upsert_task(self, pajunwi_task_id: str, state: str, **kwargs) -> None:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).isoformat()
         existing = self.get_task(pajunwi_task_id)
         if existing is None:
             # Insert with state and any provided kwargs
@@ -79,7 +79,7 @@ class Store:
         success: bool,
         error_msg: str = None,
     ) -> None:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).isoformat()
         self._conn.execute(
             "INSERT INTO state_history "
             "(pajunwi_task_id, from_state, to_state, handler, success, error_msg, executed_at) "
@@ -89,10 +89,11 @@ class Store:
         self._conn.commit()
 
     def count_transitions_today(self) -> int:
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        tomorrow = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%d")
         row = self._conn.execute(
-            "SELECT COUNT(*) FROM state_history WHERE executed_at LIKE ? AND success = 1",
-            (f"{today}%",),
+            "SELECT COUNT(*) FROM state_history WHERE executed_at >= ? AND executed_at < ? AND success = 1",
+            (f"{today}T00:00:00", f"{tomorrow}T00:00:00"),
         ).fetchone()
         return row[0]
 
