@@ -592,3 +592,23 @@ def test_step11_sheets_failure_notifies_but_does_not_crash(mock_sa, store, notif
     assert result is False
     assert store.get_task("t1")["state"] == "COMPLETED"  # not changed
     notifier.handler_error.assert_called_once()
+
+
+@patch("src.clients.sheets.gspread.service_account_from_dict")
+def test_step11_uses_zero_when_amount_missing(mock_sa, store, notifier):
+    """Step 11 defaults amount to 0 when key is absent."""
+    mock_worksheet = MagicMock()
+    mock_sa.return_value.open_by_key.return_value.sheet1 = mock_worksheet
+
+    from src.clients.sheets import SheetsClient
+    import base64, json as _json
+    sa_b64 = base64.b64encode(_json.dumps({"type": "service_account"}).encode()).decode()
+    sheets = SheetsClient(sa_b64, "sheet1")
+
+    store.upsert_task("t1", "COMPLETED")
+    handler = Step11SheetsHandler(store, notifier, sheets)
+    result = handler.run({"pajunwi_task_id": "t1", "state": "COMPLETED"})
+
+    assert result is True
+    row = mock_worksheet.append_row.call_args[0][0]
+    assert 0 in row
