@@ -1,1 +1,38 @@
+# Worktrees
 .worktrees/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Test & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Superpowers plugin cache (not project code)
+.superpowers/
