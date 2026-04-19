@@ -16,6 +16,15 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
+        """Load config from environment variables.
+
+        Required: DOORAY_API_TOKEN, DOORAY_DOMAIN, PAJUNWI_PROJECT_ID,
+                  PYCON_PROJECT_ID, GOOGLE_SERVICE_ACCOUNT_JSON (base64),
+                  SPREADSHEET_ID, SLACK_WEBHOOK_URL
+        Optional: POLL_INTERVAL_SECONDS (default 300), DATABASE_PATH (default /data/state.db)
+
+        Raises EnvironmentError listing all missing required variables.
+        """
         required = [
             "DOORAY_API_TOKEN",
             "DOORAY_DOMAIN",
