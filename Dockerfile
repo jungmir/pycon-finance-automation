@@ -10,4 +10,7 @@ COPY src/ ./src/
 # /data is mounted as Railway Volume for SQLite persistence
 RUN mkdir -p /data
 
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /data
+USER appuser
+
 CMD ["python", "-m", "src.main"]
