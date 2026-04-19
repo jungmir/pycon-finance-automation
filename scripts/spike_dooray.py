@@ -8,11 +8,24 @@ Usage:
 """
 import os
 import json
+import sys
 import requests
 
-TOKEN = os.environ["DOORAY_API_TOKEN"]
-DOMAIN = os.environ["DOORAY_DOMAIN"]
-PAJUNWI_ID = os.environ["PAJUNWI_PROJECT_ID"]
+TOKEN = os.environ.get("DOORAY_API_TOKEN")
+DOMAIN = os.environ.get("DOORAY_DOMAIN")
+PAJUNWI_ID = os.environ.get("PAJUNWI_PROJECT_ID")
+
+if not all([TOKEN, DOMAIN, PAJUNWI_ID]):
+    print(__doc__)
+    print("Missing environment variables:")
+    if not TOKEN:
+        print("  - DOORAY_API_TOKEN")
+    if not DOMAIN:
+        print("  - DOORAY_DOMAIN")
+    if not PAJUNWI_ID:
+        print("  - PAJUNWI_PROJECT_ID")
+    sys.exit(1)
+
 BASE_URL = f"https://{DOMAIN}/common/v1"
 
 # Try both common auth header formats
