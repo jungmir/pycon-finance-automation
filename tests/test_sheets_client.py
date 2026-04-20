@@ -32,8 +32,10 @@ def test_append_row_calls_gspread(mock_sa):
 
 @patch("src.clients.sheets.gspread.service_account_from_dict")
 def test_sheets_client_decodes_base64_json(mock_sa):
-    mock_sa.return_value.open_by_key.return_value.sheet1 = MagicMock()
-    SheetsClient(FAKE_SA, "sheet-id")
+    mock_ws = MagicMock()
+    mock_sa.return_value.open_by_key.return_value.sheet1 = mock_ws
+    client = SheetsClient(FAKE_SA, "sheet-id")
+    client.append_row(["row"])  # trigger lazy connect
     call_kwargs = mock_sa.call_args[0][0]
     assert call_kwargs["type"] == "service_account"
     assert call_kwargs["client_email"] == "test@test.iam.gserviceaccount.com"

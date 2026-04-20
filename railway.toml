@@ -2,5 +2,5 @@
   builder = "dockerfile"
 
 [deploy]
-  startCommand = "python -m src.main"
+  startCommand = "uv run python -m src.main"
   restartPolicyType = "always"

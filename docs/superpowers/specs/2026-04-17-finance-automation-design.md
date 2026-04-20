@@ -107,9 +107,11 @@ SHEET_UPDATED ✅
 ```
 pycon-finance-automation/
 ├── src/
-│   ├── main.py                  # 진입점 — 폴링 루프
-│   ├── state_engine.py          # 상태 머신 — 전이 판단
+│   ├── main.py                  # 진입점 — 폴링 루프 + 일일 하트비트
+│   ├── config.py                # 환경변수 → Config 데이터클래스 (startup validation)
+│   ├── state_engine.py          # 상태 머신 — 전이 판단 (선언적 상태→핸들러 매핑)
 │   ├── handlers/
+│   │   ├── base.py              # BaseHandler — retry, Slack 알림, SQLite 오류 기록 공통 처리
 │   │   ├── step2_review.py      # 신규 → 검토중
 │   │   ├── step3_copy.py        # 파이콘 포털 업무 복사
 │   │   ├── step5_payment.py     # 결제대기 상태 동기화
@@ -123,7 +125,12 @@ pycon-finance-automation/
 │   └── notifier.py              # Slack 알림
 ├── tests/
 │   ├── test_state_engine.py
-│   └── test_handlers.py
+│   ├── test_handlers.py
+│   ├── test_dooray_client.py    # mocked HTTP (responses 라이브러리)
+│   ├── test_sheets_client.py    # mocked gspread
+│   ├── test_store.py            # in-memory SQLite (:memory:)
+│   ├── test_notifier.py         # mocked webhook
+│   └── test_integration.py     # NEW → SHEET_UPDATED 전체 전이 (mock HTTP)
 ├── .env.example
 ├── Dockerfile
 ├── railway.toml
@@ -141,8 +148,8 @@ CREATE TABLE tasks (
     pajunwi_task_id TEXT UNIQUE,   -- 파준위 포털 업무 ID
     pycon_task_id   TEXT,          -- 파이콘 포털 업무 ID (Step 3 이후)
     state           TEXT,          -- 현재 상태
-    last_comment_id TEXT,          -- 마지막으로 복사한 코멘트 ID (중복 방지)
-    amount          INTEGER,       -- 금액 (시트 갱신용)
+    last_comment_id TEXT,          -- 마지막으로 복사한 코멘트 ID (중복 방지, Step 8)
+    amount          INTEGER,       -- 금액 (시트 갱신용) — Step 2에서 업무 본문 파싱으로 추출
     created_at      DATETIME,
     updated_at      DATETIME
 );
@@ -182,9 +189,14 @@ CREATE TABLE state_history (
 |------|-----------|
 | Dooray API 일시 오류 | 지수 백오프로 3회 재시도 → 실패 시 건너뜀, 다음 폴링 재시도 |
 | 핸들러 실행 실패 | state_history에 오류 기록, Slack 즉시 알림, 상태 변경 안 함 |
-| 중복 처리 위험 | SQLite tasks 테이블로 처리 이력 추적, 멱등성 보장 |
+| 중복 처리 위험 | **Check-before-act 패턴**: 모든 핸들러가 실행 전 Dooray 현재 상태를 먼저 조회. 이미 목표 상태면 SQLite만 갱신하고 성공 처리. Container 크래시 후 재시작 시 안전 보장. |
 | 파사모 반려 | 상태를 REJECTED로 변경 후 Slack 알림, 자동화 중단 |
 | Google Sheets 실패 | Slack 알림으로 수동 갱신 요청 (Dooray 상태는 이미 갱신됨) |
+| REJECTED 업무 재처리 | 수동 복구: SQLite에서 해당 업무의 state를 적절한 상태로 업데이트 → 다음 폴링에서 자동 재개 (운영자 매뉴얼 참고) |
+
+### Observability
+- **하트비트**: 매일 1회 Slack으로 현황 전송: 처리 중 업무 수, 오늘 상태 전이 횟수, 마지막 폴링 시간
+- **오류 알림**: 개별 핸들러 실패 즉시 Slack 전송
 
 ### Slack 알림 형식
 ```
@@ -239,9 +251,24 @@ DATABASE_PATH=/data/state.db    # SQLite 파일 경로 (Railway Volume)
 
 ---
 
-## 9. 미결 사항
+## 9. 미결 사항 (구현 전 반드시 해결)
 
-- Dooray API 인증 방식 및 엔드포인트 확인 필요 (REST API 문서 검토)
-- 파이콘 포털 업무 복사 시 어떤 필드를 포함할지 파사모 회계팀과 협의 필요
-- 구글 시트 회계 장부 컬럼 구조 확인 필요 (어떤 필드를 어느 열에 쓸지)
-- Dooray 업무 상태값 실제 문자열 확인 필요 (API 응답 기준)
+구현 첫 단계로 Dooray API 탐색 스파이크를 실행하여 아래 항목을 확인한 후 핸들러 코드를 작성한다.
+
+- [ ] Dooray API 인증 방식 및 엔드포인트 확인 (토큰 헤더 형식, base URL)
+- [ ] 파이콘 포털 업무 복사 시 포함 필드 목록 (파사모 회계팀과 협의)
+- [ ] 구글 시트 회계 장부 컬럼 구조 (어떤 필드를 어느 열에 쓸지)
+- [ ] Dooray 업무 상태값 실제 문자열 (NEW, 결제대기, 반려 등 API 응답 기준)
+- [ ] 업무 본문에서 금액 추출 정규식 패턴 (형식 확인 필요)
+
+## 10. 엔지니어링 리뷰 결정 사항 (2026-04-17)
+
+| 항목 | 결정 |
+|------|------|
+| 핸들러 구조 | BaseHandler 상속 구조 — retry, Slack, SQLite 오류 기록 공통 처리 |
+| 환경변수 | Config 데이터클래스 (config.py), 시작 시 즉시 검증 |
+| 멱등성 | Check-before-act 패턴 (모든 핸들러) |
+| REJECTED 복구 | 수동 SQLite 업데이트 (운영자 매뉴얼 문서화) |
+| 금액 추출 | 업무 본문(body) 파싱, 정규식 패턴은 API 탐색 시 확정 |
+| 테스트 | pytest 전체 커버리지 (7개 파일, mock HTTP, in-memory SQLite) |
+| 관찰 가능성 | 일일 Slack 하트비트 (처리 중 업무 수, 상태 전이 횟수, 마지막 폴링 시간) |

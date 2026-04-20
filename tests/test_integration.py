@@ -13,28 +13,29 @@ from src.store import Store
 from src.notifier import Notifier
 from src.clients.dooray import (
     DoorayClient,
-    DOORAY_STATUS_REVIEWING,
-    DOORAY_STATUS_PAYMENT_PENDING,
-    DOORAY_STATUS_COMPLETED,
-    DOORAY_STATUS_REJECTED,
+    DOORAY_WORKFLOW_NAME_REVIEWING,
+    DOORAY_WORKFLOW_NAME_PAYMENT_WAITING,
+    DOORAY_WORKFLOW_NAME_PAYMENT_IN_PROGRESS,
+    DOORAY_WORKFLOW_NAME_COMPLETED,
+    DOORAY_WORKFLOW_NAME_REJECTED,
+    DOORAY_WORKFLOW_ID_COMPLETED,
 )
 from src.clients.sheets import SheetsClient
 from src.state_engine import StateEngine
-from src.handlers.step2_review import Step2ReviewHandler
-from src.handlers.step3_copy import Step3CopyHandler
-from src.handlers.step5_payment import Step5PaymentHandler
-from src.handlers.step8_evidence import Step8EvidenceHandler
-from src.handlers.step10_sync import Step10SyncHandler
-from src.handlers.step11_sheets import Step11SheetsHandler
+from src.handlers.step2_track_reviewing import Step2TrackReviewingHandler
+from src.handlers.step3_track_payment_waiting import Step3TrackPaymentWaitingHandler
+from src.handlers.step4_copy_to_pycon import Step4CopyToPyconHandler
+from src.handlers.step5_track_payment_in_progress import Step5TrackPaymentInProgressHandler
+from src.handlers.step6_sync_and_complete import Step6SyncAndCompleteHandler
+from src.handlers.step8_update_sheets import Step8UpdateSheetsHandler
 
 PAJUNWI = "pajunwi-proj"
 PYCON = "pycon-proj"
-BASE = "https://test.dooray.com/common/v1"
+BASE = "https://api.dooray.com/project/v1"
 SPREADSHEET = "sheet-123"
 
 PAJUNWI_TASK_ID = "task-001"
 PYCON_TASK_ID = "pycon-task-001"
-COMMENT_ID = "comment-001"
 
 
 @pytest.fixture
@@ -49,7 +50,7 @@ def notifier():
 
 @pytest.fixture
 def dooray():
-    return DoorayClient("test.dooray.com", "tok")
+    return DoorayClient("tok")
 
 
 @pytest.fixture
@@ -64,12 +65,12 @@ def mock_sheet():
 
 def build_engine(store, notifier, dooray, sheets):
     handlers = {
-        "NEW": Step2ReviewHandler(store, notifier, dooray, PAJUNWI),
-        "REVIEWING": Step3CopyHandler(store, notifier, dooray, PAJUNWI, PYCON),
-        "COPIED_TO_PYCON": Step5PaymentHandler(store, notifier, dooray, PAJUNWI, PYCON),
-        "PAYMENT_PENDING": Step8EvidenceHandler(store, notifier, dooray, PAJUNWI, PYCON),
-        "EVIDENCE_COPIED": Step10SyncHandler(store, notifier, dooray, PAJUNWI, PYCON),
-        "COMPLETED": Step11SheetsHandler(store, notifier, sheets),
+        "NEW": Step2TrackReviewingHandler(store, notifier, dooray, PAJUNWI),
+        "REVIEWING": Step3TrackPaymentWaitingHandler(store, notifier, dooray, PAJUNWI),
+        "PAYMENT_WAITING": Step4CopyToPyconHandler(store, notifier, dooray, PAJUNWI, PYCON),
+        "COPIED_TO_PYCON": Step5TrackPaymentInProgressHandler(store, notifier, dooray, PAJUNWI),
+        "PAYMENT_IN_PROGRESS": Step6SyncAndCompleteHandler(store, notifier, dooray, PAJUNWI, PYCON),
+        "COMPLETED": Step8UpdateSheetsHandler(store, notifier, sheets),
     }
     return StateEngine(handlers, store)
 
@@ -78,106 +79,120 @@ def test_full_flow_new_to_sheet_updated(store, notifier, dooray, mock_sheet):
     sheets, mock_ws = mock_sheet
 
     with resp_lib.RequestsMock() as rsps:
-        # --- Step 2: NEW → REVIEWING ---
+        # Step 2: NEW → REVIEWING (pajunwi now shows 검토 중)
         rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
-                 json={"result": {"id": PAJUNWI_TASK_ID, "workflowClass": "registered",
-                                  "subject": "출장비 신청",
+                 json={"result": {"id": PAJUNWI_TASK_ID,
+                                  "workflow": {"name": DOORAY_WORKFLOW_NAME_REVIEWING},
                                   "body": {"content": "금액: 50,000원"}}})
-        rsps.add(resp_lib.PUT, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
-                 json={"result": {}})
 
-        # --- Step 3: REVIEWING → COPIED_TO_PYCON ---
+        # Step 3: REVIEWING → PAYMENT_WAITING (pajunwi now shows 결제 대기 중)
+        rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
+                 json={"result": {"id": PAJUNWI_TASK_ID,
+                                  "workflow": {"name": DOORAY_WORKFLOW_NAME_PAYMENT_WAITING}}})
+
+        # Step 4: PAYMENT_WAITING → COPIED_TO_PYCON (create PYCON task)
         rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
                  json={"result": {"id": PAJUNWI_TASK_ID, "subject": "출장비 신청",
                                   "body": {"content": "금액: 50,000원"}}})
         rsps.add(resp_lib.POST, f"{BASE}/projects/{PYCON}/posts",
                  json={"result": {"id": PYCON_TASK_ID}})
 
-        # --- Step 5: COPIED_TO_PYCON → PAYMENT_PENDING ---
-        rsps.add(resp_lib.GET, f"{BASE}/projects/{PYCON}/posts/{PYCON_TASK_ID}",
-                 json={"result": {"id": PYCON_TASK_ID, "workflowClass": DOORAY_STATUS_PAYMENT_PENDING}})
+        # Step 5: COPIED_TO_PYCON → PAYMENT_IN_PROGRESS (pajunwi now shows 결제 중)
         rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
-                 json={"result": {"id": PAJUNWI_TASK_ID, "workflowClass": DOORAY_STATUS_REVIEWING}})
-        rsps.add(resp_lib.PUT, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
-                 json={"result": {}})
+                 json={"result": {"id": PAJUNWI_TASK_ID,
+                                  "workflow": {"name": DOORAY_WORKFLOW_NAME_PAYMENT_IN_PROGRESS}}})
 
-        # --- Step 8: PAYMENT_PENDING → EVIDENCE_COPIED ---
-        rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}/logs",
-                 json={"result": [{"id": COMMENT_ID, "body": {"content": "영수증 첨부"}}]})
-        rsps.add(resp_lib.POST, f"{BASE}/projects/{PYCON}/posts/{PYCON_TASK_ID}/logs",
-                 json={"result": {"id": "c-pycon-001"}})
-
-        # --- Step 10: EVIDENCE_COPIED → COMPLETED ---
-        rsps.add(resp_lib.GET, f"{BASE}/projects/{PYCON}/posts/{PYCON_TASK_ID}",
-                 json={"result": {"id": PYCON_TASK_ID, "workflowClass": DOORAY_STATUS_COMPLETED}})
+        # Step 6: PAYMENT_IN_PROGRESS → COMPLETED (sync body + PYCON shows 결제 완료)
         rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
-                 json={"result": {"id": PAJUNWI_TASK_ID, "workflowClass": "working"}})
-        rsps.add(resp_lib.PUT, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
+                 json={"result": {"id": PAJUNWI_TASK_ID,
+                                  "body": {"content": "금액: 50,000원\n영수증 첨부"}}})
+        rsps.add(resp_lib.PUT, f"{BASE}/projects/{PYCON}/posts/{PYCON_TASK_ID}",
                  json={"result": {}})
+        rsps.add(resp_lib.GET, f"{BASE}/projects/{PYCON}/posts/{PYCON_TASK_ID}",
+                 json={"result": {"id": PYCON_TASK_ID,
+                                  "workflow": {"name": DOORAY_WORKFLOW_NAME_COMPLETED}}})
+        rsps.add(resp_lib.POST, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}/set-workflow",
+                 json={"result": None})
 
-        # --- Set initial state ---
         store.upsert_task(PAJUNWI_TASK_ID, "NEW")
         engine = build_engine(store, notifier, dooray, sheets)
 
-        # --- Step 2: NEW → REVIEWING ---
         engine.process()
         assert store.get_task(PAJUNWI_TASK_ID)["state"] == "REVIEWING"
         assert store.get_task(PAJUNWI_TASK_ID)["amount"] == 50000
 
-        # --- Step 3: REVIEWING → COPIED_TO_PYCON ---
+        engine.process()
+        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "PAYMENT_WAITING"
+
         engine.process()
         assert store.get_task(PAJUNWI_TASK_ID)["state"] == "COPIED_TO_PYCON"
         assert store.get_task(PAJUNWI_TASK_ID)["pycon_task_id"] == PYCON_TASK_ID
 
-        # --- Step 5: COPIED_TO_PYCON → PAYMENT_PENDING ---
         engine.process()
-        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "PAYMENT_PENDING"
+        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "PAYMENT_IN_PROGRESS"
 
-        # --- Step 8: PAYMENT_PENDING → EVIDENCE_COPIED ---
-        engine.process()
-        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "EVIDENCE_COPIED"
-        assert store.get_task(PAJUNWI_TASK_ID)["last_comment_id"] == COMMENT_ID
-
-        # --- Step 10: EVIDENCE_COPIED → COMPLETED ---
         engine.process()
         assert store.get_task(PAJUNWI_TASK_ID)["state"] == "COMPLETED"
 
-        # --- Step 11: COMPLETED → SHEET_UPDATED ---
         engine.process()
         assert store.get_task(PAJUNWI_TASK_ID)["state"] == "SHEET_UPDATED"
 
-        # Verify Google Sheets was updated
         mock_ws.append_row.assert_called_once()
         row = mock_ws.append_row.call_args[0][0]
-        assert 50000 in row  # amount in the ledger row
+        assert 50000 in row
 
 
-def test_rejected_flow_stops_at_step5(store, notifier, dooray, mock_sheet):
+def test_rejected_at_reviewing_stops_flow(store, notifier, dooray, mock_sheet):
     sheets, _ = mock_sheet
 
     with resp_lib.RequestsMock() as rsps:
+        # Step 2: pajunwi shows 반려 → straight to REJECTED
         rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
-                 json={"result": {"id": PAJUNWI_TASK_ID, "workflowClass": "registered",
-                                  "subject": "출장비", "body": {"content": "금액: 10,000원"}}})
-        rsps.add(resp_lib.PUT, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
-                 json={"result": {}})
+                 json={"result": {"id": PAJUNWI_TASK_ID,
+                                  "workflow": {"name": DOORAY_WORKFLOW_NAME_REJECTED}}})
+
+        store.upsert_task(PAJUNWI_TASK_ID, "NEW")
+        engine = build_engine(store, notifier, dooray, sheets)
+
+        engine.process()
+        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "REJECTED"
+        notifier.task_rejected.assert_called_once_with(PAJUNWI_TASK_ID)
+
+        engine.process()
+        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "REJECTED"
+
+
+def test_rejected_at_copied_to_pycon_stops_flow(store, notifier, dooray, mock_sheet):
+    sheets, _ = mock_sheet
+
+    with resp_lib.RequestsMock() as rsps:
+        # Step 2: 검토 중
         rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
-                 json={"result": {"id": PAJUNWI_TASK_ID, "subject": "출장비", "body": {"content": ""}}})
+                 json={"result": {"id": PAJUNWI_TASK_ID,
+                                  "workflow": {"name": DOORAY_WORKFLOW_NAME_REVIEWING},
+                                  "body": {"content": "금액: 10,000원"}}})
+        # Step 3: 결제 대기 중
+        rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
+                 json={"result": {"id": PAJUNWI_TASK_ID,
+                                  "workflow": {"name": DOORAY_WORKFLOW_NAME_PAYMENT_WAITING}}})
+        # Step 4: create PYCON task
+        rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
+                 json={"result": {"id": PAJUNWI_TASK_ID, "subject": "출장비",
+                                  "body": {"content": ""}}})
         rsps.add(resp_lib.POST, f"{BASE}/projects/{PYCON}/posts",
                  json={"result": {"id": PYCON_TASK_ID}})
-        rsps.add(resp_lib.GET, f"{BASE}/projects/{PYCON}/posts/{PYCON_TASK_ID}",
-                 json={"result": {"id": PYCON_TASK_ID, "workflowClass": "closed"}})
+        # Step 5: pajunwi shows 반려
+        rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
+                 json={"result": {"id": PAJUNWI_TASK_ID,
+                                  "workflow": {"name": DOORAY_WORKFLOW_NAME_REJECTED}}})
 
         store.upsert_task(PAJUNWI_TASK_ID, "NEW")
         engine = build_engine(store, notifier, dooray, sheets)
 
         engine.process()  # NEW → REVIEWING
-        engine.process()  # REVIEWING → COPIED_TO_PYCON
+        engine.process()  # REVIEWING → PAYMENT_WAITING
+        engine.process()  # PAYMENT_WAITING → COPIED_TO_PYCON
         engine.process()  # COPIED_TO_PYCON → REJECTED
 
         assert store.get_task(PAJUNWI_TASK_ID)["state"] == "REJECTED"
-        notifier.task_rejected.assert_called_once_with(PYCON_TASK_ID)
-
-        # One more cycle — REJECTED tasks should not be processed
-        engine.process()
-        assert store.get_task(PAJUNWI_TASK_ID)["state"] == "REJECTED"  # unchanged
+        notifier.task_rejected.assert_called_once_with(PAJUNWI_TASK_ID)

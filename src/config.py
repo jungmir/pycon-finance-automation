@@ -5,7 +5,6 @@ import os
 @dataclass
 class Config:
     dooray_api_token: str
-    dooray_domain: str
     pajunwi_project_id: str
     pycon_project_id: str
     google_service_account_json: str  # base64-encoded service account JSON
@@ -18,16 +17,14 @@ class Config:
     def from_env(cls) -> "Config":
         """Load config from environment variables.
 
-        Required: DOORAY_API_TOKEN, DOORAY_DOMAIN, PAJUNWI_PROJECT_ID,
-                  PYCON_PROJECT_ID, GOOGLE_SERVICE_ACCOUNT_JSON (base64),
-                  SPREADSHEET_ID, SLACK_WEBHOOK_URL
+        Required: DOORAY_API_TOKEN, PAJUNWI_PROJECT_ID, PYCON_PROJECT_ID,
+                  GOOGLE_SERVICE_ACCOUNT_JSON (base64), SPREADSHEET_ID, SLACK_WEBHOOK_URL
         Optional: POLL_INTERVAL_SECONDS (default 300), DATABASE_PATH (default /data/state.db)
 
         Raises EnvironmentError listing all missing required variables.
         """
         required = [
             "DOORAY_API_TOKEN",
-            "DOORAY_DOMAIN",
             "PAJUNWI_PROJECT_ID",
             "PYCON_PROJECT_ID",
             "GOOGLE_SERVICE_ACCOUNT_JSON",
@@ -41,7 +38,6 @@ class Config:
             )
         return cls(
             dooray_api_token=os.environ["DOORAY_API_TOKEN"],
-            dooray_domain=os.environ["DOORAY_DOMAIN"],
             pajunwi_project_id=os.environ["PAJUNWI_PROJECT_ID"],
             pycon_project_id=os.environ["PYCON_PROJECT_ID"],
             google_service_account_json=os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"],

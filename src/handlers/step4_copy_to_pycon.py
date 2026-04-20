@@ -2,9 +2,11 @@ from .base import BaseHandler
 from ..clients.dooray import DoorayClient
 
 
-class Step3CopyHandler(BaseHandler):
-    name = "step3_copy"
-    from_state = "REVIEWING"
+class Step4CopyToPyconHandler(BaseHandler):
+    """Copy pajunwi task to pycon project when pajunwi reaches 결제 대기 중."""
+
+    name = "step4_copy_to_pycon"
+    from_state = "PAYMENT_WAITING"
     to_state = "COPIED_TO_PYCON"
 
     def __init__(
@@ -23,18 +25,14 @@ class Step3CopyHandler(BaseHandler):
     def execute(self, task: dict) -> dict:
         pajunwi_task_id = task["pajunwi_task_id"]
 
-        # Cross-project copy: we cannot query pycon portal by pajunwi task ID.
-        # Idempotency relies on pycon_task_id being persisted in SQLite after first successful copy.
-        # SPIKE_REQUIRED: verify if pycon portal supports querying tasks by external reference.
+        # Cross-project idempotency: pycon portal has no external reference query — rely on SQLite.
         if task.get("pycon_task_id"):
             return {"pycon_task_id": task["pycon_task_id"]}
 
-        # Fetch current task data from pajunwi portal
         source = self.dooray.get_task(self.pajunwi_project_id, pajunwi_task_id)
         subject = source.get("subject", "")
         body_content = source.get("body", {}).get("content", "")
 
-        # SPIKE_REQUIRED: confirm which extra fields to include (agreed with 파사모 team)
         new_task = self.dooray.create_task(
             self.pycon_project_id,
             subject=subject,

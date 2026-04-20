@@ -3,8 +3,8 @@ from .base import BaseHandler
 from ..clients.sheets import SheetsClient
 
 
-class Step11SheetsHandler(BaseHandler):
-    name = "step11_sheets"
+class Step8UpdateSheetsHandler(BaseHandler):
+    name = "step8_update_sheets"
     from_state = "COMPLETED"
     to_state = "SHEET_UPDATED"
 
@@ -18,9 +18,6 @@ class Step11SheetsHandler(BaseHandler):
         today = datetime.now(UTC).strftime("%Y-%m-%d")
 
         # SPIKE_REQUIRED: confirm column order with 파사모 team
-        # Expected columns: [날짜, 항목, 신청팀, 금액, ...]
         row = [today, pajunwi_task_id, amount]
-        # NOTE: not idempotent — a retry will append a duplicate row.
-        # Deferred pending 파사모 team confirmation of column order and de-dup strategy.
         self.sheets.append_row(row)
         return True

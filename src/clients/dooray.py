@@ -4,33 +4,44 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# SPIKE_REQUIRED: verify these values against docs/spike-dooray-api.md
-DOORAY_STATUS_NEW = "registered"
-DOORAY_STATUS_REVIEWING = "working"
-DOORAY_STATUS_PAYMENT_PENDING = "paymentPending"  # SPIKE_REQUIRED
-DOORAY_STATUS_REJECTED = "closed"                 # SPIKE_REQUIRED
-DOORAY_STATUS_COMPLETED = "done"                  # SPIKE_REQUIRED
+# workflowClass: 3 fixed values system-wide — registered / working / closed
+# Multiple named workflows share the same class; use workflow.name for fine-grained detection.
 
-# SPIKE_REQUIRED: verify field names for task objects
-TASK_ID_FIELD = "id"          # SPIKE_REQUIRED: "id" or "postId"?
-TASK_STATUS_FIELD = "workflowClass"  # SPIKE_REQUIRED: "workflowClass" or "workflowId"?
-COMMENT_ID_FIELD = "id"       # SPIKE_REQUIRED: "id" or "logId"?
+# workflowClass values (for broad filtering)
+DOORAY_STATUS_NEW = "registered"
+DOORAY_STATUS_WORKING = "working"
+DOORAY_STATUS_CLOSED = "closed"
+
+# workflow.name values — shared across pajunwi and pycon projects
+DOORAY_WORKFLOW_NAME_NEW = "검토 전"
+DOORAY_WORKFLOW_NAME_REVIEWING = "검토 중"
+DOORAY_WORKFLOW_NAME_PAYMENT_WAITING = "결제 대기 중"
+DOORAY_WORKFLOW_NAME_PAYMENT_IN_PROGRESS = "결제 중"
+DOORAY_WORKFLOW_NAME_COMPLETED = "결제 완료"
+DOORAY_WORKFLOW_NAME_REJECTED = "반려"
+DOORAY_WORKFLOW_NAME_APPROVED = "요청 승인"
+
+# Pajunwi workflow IDs — only needed for the one write we make (결제 완료 final sync)
+DOORAY_WORKFLOW_ID_COMPLETED = "4266443407649875626"
+
+TASK_ID_FIELD = "id"
+COMMENT_ID_FIELD = "id"
+
+_BASE_URL = "https://api.dooray.com/project/v1"
 
 
 class DoorayClient:
     """REST client for Dooray task management API with automatic retry."""
 
-    def __init__(self, domain: str, token: str):
-        self._base_url = f"https://{domain}/common/v1"
+    def __init__(self, token: str):
         self._session = requests.Session()
-        # SPIKE_REQUIRED: verify auth header format
         self._session.headers.update({
             "Authorization": f"dooray-api {token}",
             "Content-Type": "application/json",
         })
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
-        url = f"{self._base_url}{path}"
+        url = f"{_BASE_URL}{path}"
         last_exc = None
         for attempt in range(3):
             try:
@@ -50,7 +61,7 @@ class DoorayClient:
     def get_tasks(self, project_id: str, status: str = None) -> list[dict]:
         params = {"size": 100, "page": 0}
         if status:
-            params["workflowClass"] = status  # SPIKE_REQUIRED: verify param name
+            params["postWorkflowClasses"] = status
         data = self._request("GET", f"/projects/{project_id}/posts", params=params)
         return data.get("result", [])
 
@@ -58,9 +69,13 @@ class DoorayClient:
         data = self._request("GET", f"/projects/{project_id}/posts/{task_id}")
         return data.get("result", {})
 
-    def update_task_status(self, project_id: str, task_id: str, status: str) -> dict:
-        # SPIKE_REQUIRED: verify payload field name and value format
-        payload = {TASK_STATUS_FIELD: status}
+    def update_task_status(self, project_id: str, task_id: str, workflow_id: str) -> dict:
+        payload = {"workflowId": workflow_id}
+        data = self._request("POST", f"/projects/{project_id}/posts/{task_id}/set-workflow", json=payload)
+        return data.get("result") or {}
+
+    def update_task_body(self, project_id: str, task_id: str, body_content: str) -> dict:
+        payload = {"body": {"mimeType": "text/x-markdown", "content": body_content}}
         data = self._request("PUT", f"/projects/{project_id}/posts/{task_id}", json=payload)
         return data.get("result", {})
 

@@ -3,12 +3,12 @@ import pytest
 from src.clients.dooray import DoorayClient
 
 
-BASE = "https://test.dooray.com/common/v1"
+BASE = "https://api.dooray.com/project/v1"
 
 
 @pytest.fixture
 def client():
-    return DoorayClient("test.dooray.com", "token123")
+    return DoorayClient("token123")
 
 
 @resp_lib.activate
@@ -32,7 +32,7 @@ def test_get_tasks_passes_status_filter(client):
         status=200,
     )
     client.get_tasks("proj1", status="registered")
-    assert "workflowClass" in resp_lib.calls[0].request.url
+    assert "postWorkflowClasses" in resp_lib.calls[0].request.url
 
 
 @resp_lib.activate
@@ -50,9 +50,9 @@ def test_get_task_returns_single(client):
 @resp_lib.activate
 def test_update_task_status(client):
     resp_lib.add(
-        resp_lib.PUT,
-        f"{BASE}/projects/proj1/posts/t1",
-        json={"result": {}},
+        resp_lib.POST,
+        f"{BASE}/projects/proj1/posts/t1/set-workflow",
+        json={"result": None},
         status=200,
     )
     client.update_task_status("proj1", "t1", "working")

@@ -26,58 +26,92 @@ if not all([TOKEN, DOMAIN, PAJUNWI_ID]):
         print("  - PAJUNWI_PROJECT_ID")
     sys.exit(1)
 
-BASE_URL = f"https://{DOMAIN}/common/v1"
+# Token may be "memberId:apiKey" format — try both full token and key-only part
+TOKEN_KEY = TOKEN.split(":")[-1] if ":" in TOKEN else TOKEN
 
-# Try both common auth header formats
-headers_v1 = {"Authorization": f"dooray-api {TOKEN}", "Content-Type": "application/json"}
-headers_v2 = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+CANDIDATES = [
+    (f"https://{DOMAIN}/project/v1",       f"dooray-api {TOKEN}"),
+    ("https://api.dooray.com/project/v1",  f"dooray-api {TOKEN}"),
+    (f"https://{DOMAIN}/project/v1",       f"dooray-api {TOKEN_KEY}"),
+    ("https://api.dooray.com/project/v1",  f"dooray-api {TOKEN_KEY}"),
+]
+
+WORKING_BASE = None
+WORKING_AUTH = None
 
 
-def try_request(label, method, path, headers, **kwargs):
-    url = f"{BASE_URL}{path}"
+def try_request(label, method, path, **kwargs):
+    url = f"{WORKING_BASE}{path}"
+    hdrs = {"Authorization": WORKING_AUTH, "Content-Type": "application/json"}
     print(f"\n=== {label} ===")
     print(f"URL: {url}")
-    r = requests.request(method, url, headers=headers, **kwargs)
+    r = requests.request(method, url, headers=hdrs, **kwargs)
     print(f"Status: {r.status_code}")
     try:
         body = r.json()
-        print(json.dumps(body, indent=2, ensure_ascii=False)[:2000])
+        print(json.dumps(body, indent=2, ensure_ascii=False)[:3000])
     except Exception:
-        print(r.text[:500])
+        print(r.text[:300])
     return r
 
 
-# 1. List tasks in pajunwi project (no filter)
-r = try_request("List pajunwi tasks (dooray-api auth)", "GET",
-                f"/projects/{PAJUNWI_ID}/posts", headers_v1,
-                params={"size": 5})
-if r.status_code != 200:
-    print("\nRetrying with Bearer auth...")
-    try_request("List pajunwi tasks (Bearer auth)", "GET",
-                f"/projects/{PAJUNWI_ID}/posts", headers_v2,
-                params={"size": 5})
+# 0. Find working (base_url, auth) combo
+print("=== Probing base URL + auth combinations ===")
+r = None
+for base, auth in CANDIDATES:
+    hdrs = {"Authorization": auth, "Content-Type": "application/json"}
+    probe = requests.get(f"{base}/projects/{PAJUNWI_ID}/posts",
+                         headers=hdrs, params={"size": 1})
+    is_json = "application/json" in probe.headers.get("Content-Type", "")
+    print(f"  {base} | {auth[:30]}... → {probe.status_code} {'(JSON)' if is_json else '(HTML)'}")
+    if probe.status_code == 200 and is_json:
+        WORKING_BASE, WORKING_AUTH = base, auth
+        r = probe
+        print(f"  ✓ Found working combo!")
+        break
 
-# 2. Get project workflow states (to discover status strings)
-try_request("Get project workflow", "GET",
-            f"/projects/{PAJUNWI_ID}", headers_v1)
+if not WORKING_BASE:
+    print("\n  ✗ No working combo found. Showing best response:")
+    best = None
+    for base, auth in CANDIDATES:
+        hdrs = {"Authorization": auth, "Content-Type": "application/json"}
+        probe = requests.get(f"{base}/projects/{PAJUNWI_ID}/posts",
+                             headers=hdrs, params={"size": 1})
+        is_json = "application/json" in probe.headers.get("Content-Type", "")
+        if is_json:
+            best = (base, auth, probe)
+            break
+    if best:
+        WORKING_BASE, WORKING_AUTH, r = best
+    else:
+        WORKING_BASE, WORKING_AUTH = CANDIDATES[0][0], CANDIDATES[0][1]
+    print(f"  Using: {WORKING_BASE}")
 
-# 3. Get a single task if any exist
-r2 = requests.get(f"{BASE_URL}/projects/{PAJUNWI_ID}/posts",
-                  headers=headers_v1, params={"size": 1})
-if r2.status_code == 200:
-    result = r2.json().get("result", [])
+# 1. List tasks in pajunwi project
+r = try_request("List pajunwi tasks", "GET",
+                f"/projects/{PAJUNWI_ID}/posts", params={"size": 5})
+
+# 2. Get project info + workflow states
+try_request("Get project info", "GET", f"/projects/{PAJUNWI_ID}")
+
+# 3. Get project workflows (status strings)
+try_request("Get project workflows", "GET", f"/projects/{PAJUNWI_ID}/workflows")
+
+# 4. Get a single task and its comments
+if r.status_code == 200:
+    result = r.json().get("result", [])
     if result:
-        task_id = result[0].get("id") or result[0].get("postId")
+        task_id = result[0].get("id")
         if task_id:
             try_request(f"Get single task {task_id}", "GET",
-                        f"/projects/{PAJUNWI_ID}/posts/{task_id}", headers_v1)
+                        f"/projects/{PAJUNWI_ID}/posts/{task_id}")
             try_request(f"Get task comments {task_id}", "GET",
-                        f"/projects/{PAJUNWI_ID}/posts/{task_id}/logs", headers_v1)
+                        f"/projects/{PAJUNWI_ID}/posts/{task_id}/logs")
 
-print("\n\n=== RECORD THESE IN docs/spike-dooray-api.md ===")
-print("1. Which auth header format worked?")
-print("2. What is the field name for task status in the response?")
-print("3. What are the status string values (new, reviewing, payment_pending, rejected, done)?")
-print("4. What fields are present on a task (id, subject, body, workflowId, etc.)?")
-print("5. What does the body field look like (content, mimeType)?")
-print("6. What does a comment look like (id, body)?")
+print("\n\n=== ANSWERS TO RECORD IN docs/spike-dooray-api.md ===")
+print("1. Auth header: 'dooray-api {token}'")
+print("2. Task ID field: 'id'")
+print("3. Status field: 'workflowClass' (registered|working|closed) + 'workflow.id'/'workflow.name' for custom statuses")
+print("4. Check 'workflow.name' values from the tasks/workflows above for custom status strings")
+print("5. Body field: body.content + body.mimeType")
+print("6. Comment ID field: check 'id' vs 'logId' in logs response above")
