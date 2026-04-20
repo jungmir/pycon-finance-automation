@@ -41,7 +41,7 @@ def build_engine(cfg: Config, store: Store, notifier: Notifier) -> StateEngine:
         "PAYMENT_IN_PROGRESS": Step6SyncAndCompleteHandler(
             store, notifier, dooray, cfg.pajunwi_project_id, cfg.pycon_project_id
         ),
-        "COMPLETED": Step8UpdateSheetsHandler(store, notifier, sheets),
+        "COMPLETED": Step8UpdateSheetsHandler(store, notifier, sheets, dooray, cfg.pajunwi_project_id),
     }
     return StateEngine(handlers, store)
 

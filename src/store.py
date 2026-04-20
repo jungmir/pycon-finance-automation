@@ -18,6 +18,9 @@ class Store:
                 state           TEXT NOT NULL,
                 last_comment_id TEXT,
                 amount          INTEGER,
+                subject         TEXT,
+                creator         TEXT,
+                tag             TEXT,
                 created_at      TEXT NOT NULL,
                 updated_at      TEXT NOT NULL
             );
@@ -32,6 +35,11 @@ class Store:
                 executed_at     TEXT NOT NULL
             );
         """)
+        for col, col_type in [("subject", "TEXT"), ("creator", "TEXT"), ("tag", "TEXT")]:
+            try:
+                self._conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
         self._conn.commit()
 
     def upsert_task(self, pajunwi_task_id: str, state: str, **kwargs) -> None:

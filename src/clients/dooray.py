@@ -28,6 +28,7 @@ TASK_ID_FIELD = "id"
 COMMENT_ID_FIELD = "id"
 
 _BASE_URL = "https://api.dooray.com/project/v1"
+_WEB_BASE_URL = "https://pyconkr.dooray.com/task"
 
 
 class DoorayClient:
@@ -87,6 +88,14 @@ class DoorayClient:
         }
         data = self._request("POST", f"/projects/{project_id}/posts", json=payload)
         return data.get("result", {})
+
+    def get_tags(self, project_id: str) -> dict[str, str]:
+        """Return {tag_id: tag_name} mapping for the project."""
+        data = self._request("GET", f"/projects/{project_id}/tags")
+        return {t["id"]: t["name"] for t in data.get("result", [])}
+
+    def task_web_url(self, project_id: str, task_id: str) -> str:
+        return f"{_WEB_BASE_URL}/{project_id}/{task_id}"
 
     def get_comments(self, project_id: str, task_id: str) -> list[dict]:
         data = self._request("GET", f"/projects/{project_id}/posts/{task_id}/logs")

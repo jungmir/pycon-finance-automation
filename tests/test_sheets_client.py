@@ -18,24 +18,25 @@ FAKE_SA = base64.b64encode(json.dumps({
 
 
 @patch("src.clients.sheets.gspread.service_account_from_dict")
-def test_append_row_calls_gspread(mock_sa):
+def test_append_expense_row_calls_gspread(mock_sa):
     mock_worksheet = MagicMock()
-    mock_sa.return_value.open_by_key.return_value.sheet1 = mock_worksheet
+    mock_sa.return_value.open_by_key.return_value.worksheet.return_value = mock_worksheet
 
     client = SheetsClient(FAKE_SA, "sheet-id-123")
-    client.append_row(["2026-04-17", "출장비", "파준위", 50000])
+    row = ["활동비 증빙", "", "출장비 신청", "2026-04-17", "홍길동", 50000, "https://pyconkr.dooray.com/task/proj/task1"]
+    client.append_expense_row(row)
 
-    mock_sa.assert_called_once()
     mock_sa.return_value.open_by_key.assert_called_once_with("sheet-id-123")
-    mock_worksheet.append_row.assert_called_once_with(["2026-04-17", "출장비", "파준위", 50000])
+    mock_sa.return_value.open_by_key.return_value.worksheet.assert_called_once_with("지출")
+    mock_worksheet.append_row.assert_called_once_with(row)
 
 
 @patch("src.clients.sheets.gspread.service_account_from_dict")
 def test_sheets_client_decodes_base64_json(mock_sa):
     mock_ws = MagicMock()
-    mock_sa.return_value.open_by_key.return_value.sheet1 = mock_ws
+    mock_sa.return_value.open_by_key.return_value.worksheet.return_value = mock_ws
     client = SheetsClient(FAKE_SA, "sheet-id")
-    client.append_row(["row"])  # trigger lazy connect
+    client.append_expense_row(["row"])
     call_kwargs = mock_sa.call_args[0][0]
     assert call_kwargs["type"] == "service_account"
     assert call_kwargs["client_email"] == "test@test.iam.gserviceaccount.com"

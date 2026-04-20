@@ -39,7 +39,15 @@ class Step2TrackReviewingHandler(BaseHandler):
 
         body_content = current.get("body", {}).get("content", "")
         amount = self._parse_amount(body_content)
-        return {"amount": amount}
+
+        subject = current.get("subject", "")
+        creator = current.get("users", {}).get("from", {}).get("member", {}).get("name", "")
+
+        tag_ids = [t["id"] for t in current.get("tags", [])]
+        tag_map = self.dooray.get_tags(self.project_id) if tag_ids else {}
+        tag = tag_map.get(tag_ids[0], "") if tag_ids else ""
+
+        return {"amount": amount, "subject": subject, "creator": creator, "tag": tag}
 
     def _parse_amount(self, body: str) -> int:
         match = AMOUNT_RE.search(body)

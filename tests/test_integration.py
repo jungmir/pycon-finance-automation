@@ -57,7 +57,7 @@ def dooray():
 def mock_sheet():
     mock_ws = MagicMock()
     with patch("src.clients.sheets.gspread.service_account_from_dict") as mock_sa:
-        mock_sa.return_value.open_by_key.return_value.sheet1 = mock_ws
+        mock_sa.return_value.open_by_key.return_value.worksheet.return_value = mock_ws
         sa_b64 = base64.b64encode(json.dumps({"type": "service_account"}).encode()).decode()
         sheets = SheetsClient(sa_b64, SPREADSHEET)
         yield sheets, mock_ws
@@ -70,7 +70,7 @@ def build_engine(store, notifier, dooray, sheets):
         "PAYMENT_WAITING": Step4CopyToPyconHandler(store, notifier, dooray, PAJUNWI, PYCON),
         "COPIED_TO_PYCON": Step5TrackPaymentInProgressHandler(store, notifier, dooray, PAJUNWI),
         "PAYMENT_IN_PROGRESS": Step6SyncAndCompleteHandler(store, notifier, dooray, PAJUNWI, PYCON),
-        "COMPLETED": Step8UpdateSheetsHandler(store, notifier, sheets),
+        "COMPLETED": Step8UpdateSheetsHandler(store, notifier, sheets, dooray, PAJUNWI),
     }
     return StateEngine(handlers, store)
 
@@ -81,9 +81,13 @@ def test_full_flow_new_to_sheet_updated(store, notifier, dooray, mock_sheet):
     with resp_lib.RequestsMock() as rsps:
         # Step 2: NEW → REVIEWING (pajunwi now shows 검토 중)
         rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
-                 json={"result": {"id": PAJUNWI_TASK_ID,
+                 json={"result": {"id": PAJUNWI_TASK_ID, "subject": "출장비 신청",
                                   "workflow": {"name": DOORAY_WORKFLOW_NAME_REVIEWING},
-                                  "body": {"content": "금액: 50,000원"}}})
+                                  "body": {"content": "금액: 50,000원"},
+                                  "tags": [{"id": "tag-001"}],
+                                  "users": {"from": {"type": "member", "member": {"name": "홍길동"}}}}})
+        rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/tags",
+                 json={"result": [{"id": "tag-001", "name": "활동비 증빙", "color": "EBFFEF"}]})
 
         # Step 3: REVIEWING → PAYMENT_WAITING (pajunwi now shows 결제 대기 중)
         rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
@@ -139,7 +143,11 @@ def test_full_flow_new_to_sheet_updated(store, notifier, dooray, mock_sheet):
 
         mock_ws.append_row.assert_called_once()
         row = mock_ws.append_row.call_args[0][0]
-        assert 50000 in row
+        # [대분류, 소분류, 내용, 날짜, 담당자, 금액, 비고]
+        assert row[0] == "활동비 증빙"
+        assert row[2] == "출장비 신청"
+        assert row[4] == "홍길동"
+        assert row[5] == 50000
 
 
 def test_rejected_at_reviewing_stops_flow(store, notifier, dooray, mock_sheet):
@@ -168,9 +176,11 @@ def test_rejected_at_copied_to_pycon_stops_flow(store, notifier, dooray, mock_sh
     with resp_lib.RequestsMock() as rsps:
         # Step 2: 검토 중
         rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
-                 json={"result": {"id": PAJUNWI_TASK_ID,
+                 json={"result": {"id": PAJUNWI_TASK_ID, "subject": "교통비",
                                   "workflow": {"name": DOORAY_WORKFLOW_NAME_REVIEWING},
-                                  "body": {"content": "금액: 10,000원"}}})
+                                  "body": {"content": "금액: 10,000원"},
+                                  "tags": [], "users": {"from": {"type": "member", "member": {"name": "홍길동"}}}}})
+
         # Step 3: 결제 대기 중
         rsps.add(resp_lib.GET, f"{BASE}/projects/{PAJUNWI}/posts/{PAJUNWI_TASK_ID}",
                  json={"result": {"id": PAJUNWI_TASK_ID,
