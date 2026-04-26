@@ -1,4 +1,6 @@
-from datetime import datetime, UTC
+from datetime import datetime, timezone, timedelta
+
+_KST = timezone(timedelta(hours=9))
 from .base import BaseHandler
 from ..clients.dooray import DoorayClient
 from ..clients.sheets import SheetsClient
@@ -17,7 +19,7 @@ class Step8UpdateSheetsHandler(BaseHandler):
 
     def execute(self, task: dict):
         pajunwi_task_id = task["pajunwi_task_id"]
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        today = datetime.now(_KST).strftime("%Y-%m-%d")
         task_url = self.dooray.task_web_url(self.pajunwi_project_id, pajunwi_task_id)
 
         # 지출 시트 컬럼 순서: 대분류, 소분류, 내용, 날짜, 담당자, 금액, 비고

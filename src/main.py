@@ -1,7 +1,9 @@
 import logging
 import schedule
 import time
-from datetime import datetime, UTC
+from datetime import datetime, UTC, timezone, timedelta
+
+KST = timezone(timedelta(hours=9))
 
 from .config import Config
 from .store import Store
@@ -65,7 +67,7 @@ def discover_new_tasks(cfg: Config, store: Store, dooray: DoorayClient) -> int:
 def run_poll(cfg: Config, store: Store, notifier: Notifier, engine: StateEngine,
              dooray: DoorayClient) -> None:
     global _last_poll_time
-    _last_poll_time = datetime.now(UTC).isoformat()
+    _last_poll_time = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
     logger.info("Poll cycle started")
 
     discovered = discover_new_tasks(cfg, store, dooray)
