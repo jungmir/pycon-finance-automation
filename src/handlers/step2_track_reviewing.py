@@ -3,6 +3,7 @@ from .base import BaseHandler
 from ..clients.dooray import (
     DoorayClient,
     DOORAY_WORKFLOW_NAME_REVIEWING,
+    DOORAY_WORKFLOW_NAME_PAYMENT_WAITING,
     DOORAY_WORKFLOW_NAME_REJECTED,
 )
 
@@ -34,7 +35,8 @@ class Step2TrackReviewingHandler(BaseHandler):
             self.notifier.task_rejected(pajunwi_task_id)
             return None
 
-        if workflow_name != DOORAY_WORKFLOW_NAME_REVIEWING:
+        # 검토 중 또는 이미 결제 대기 중 이상으로 진행된 경우 모두 메타데이터 수집 후 전환
+        if workflow_name not in (DOORAY_WORKFLOW_NAME_REVIEWING, DOORAY_WORKFLOW_NAME_PAYMENT_WAITING):
             return None  # still 검토 전, keep waiting
 
         body_content = current.get("body", {}).get("content", "")

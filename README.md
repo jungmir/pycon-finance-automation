@@ -16,7 +16,7 @@
 | 상태 | 설명 |
 |------|------|
 | NEW | 파준위 두레이에 업무가 등록됨 |
-| REVIEWING | 검토자가 업무를 검토 중 (두레이 워크플로: 검토 중) |
+| REVIEWING | 검토자가 업무를 검토 중 (두레이 워크플로: 검토 중 또는 결제 대기 중) |
 | PAYMENT_WAITING | 검토 완료, 결제 대기 중 (두레이 워크플로: 결제 대기 중) |
 | COPIED_TO_PYCON | 파이콘 두레이 프로젝트에 결제 업무 복사됨 |
 | PAYMENT_IN_PROGRESS | 파이콘 측에서 결제 진행 중 (두레이 워크플로: 결제 중) |
@@ -103,3 +103,30 @@ uv run pytest --cov=src  # 커버리지 포함
 - **시트 기록 실패**: 구글 시트 기록 실패 시
 
 슬랙 워크스페이스에서 Incoming Webhook을 생성하여 `SLACK_WEBHOOK_URL` 환경 변수에 설정합니다.
+
+## 운영 가이드
+
+### 태스크가 처리되지 않을 때
+
+봇이 시작되기 전에 이미 생성됐거나, 검토자가 `"검토 전"` → `"결제 대기 중"`으로 단계를 건너뛰어 변경한 경우 태스크가 자동으로 발견되지 않을 수 있습니다.
+
+**증상**: 두레이에서 결제 대기 중 상태인데 파이콘 프로젝트로 복사가 되지 않음
+
+**조치**: Railway CLI로 해당 태스크를 DB에 직접 주입합니다.
+
+```bash
+# railway CLI 설치
+npm install -g @railway/cli
+railway login
+railway link
+
+# 두레이에서 태스크 ID 확인 후 주입 (TASK_ID를 실제 ID로 교체)
+railway run python -c "
+from src.store import Store
+s = Store('/data/state.db')
+s.upsert_task('TASK_ID', 'PAYMENT_WAITING')
+print('완료:', s.get_task('TASK_ID'))
+"
+```
+
+주입 후 다음 폴링(최대 5분)에 자동으로 파이콘 프로젝트로 복사됩니다.
