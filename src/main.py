@@ -35,7 +35,8 @@ def build_engine(cfg: Config, store: Store, notifier: Notifier) -> StateEngine:
         "NEW": Step2TrackReviewingHandler(store, notifier, dooray, cfg.pajunwi_project_id),
         "REVIEWING": Step3TrackPaymentWaitingHandler(store, notifier, dooray, cfg.pajunwi_project_id),
         "PAYMENT_WAITING": Step4CopyToPyconHandler(
-            store, notifier, dooray, cfg.pajunwi_project_id, cfg.pycon_project_id
+            store, notifier, dooray, cfg.pajunwi_project_id, cfg.pycon_project_id,
+            cfg.pycon_accounting_group_id, cfg.pycon_executive_member_ids,
         ),
         "COPIED_TO_PYCON": Step5TrackPaymentInProgressHandler(
             store, notifier, dooray, cfg.pajunwi_project_id
