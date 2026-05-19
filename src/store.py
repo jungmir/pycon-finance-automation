@@ -105,6 +105,22 @@ class Store:
         ).fetchone()
         return row[0]
 
+    def count_transitions_this_week(self) -> int:
+        week_ago = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM state_history WHERE executed_at >= ? AND success = 1",
+            (week_ago,),
+        ).fetchone()
+        return row[0]
+
+    def count_completed_tasks_this_week(self) -> int:
+        week_ago = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM state_history WHERE executed_at >= ? AND to_state = 'SHEET_UPDATED' AND success = 1",
+            (week_ago,),
+        ).fetchone()
+        return row[0]
+
     def count_active_tasks(self) -> int:
         row = self._conn.execute(
             "SELECT COUNT(*) FROM tasks WHERE state NOT IN ('SHEET_UPDATED', 'REJECTED')"

@@ -37,11 +37,12 @@ class Notifier:
             f"   오류: {error}"
         )
 
-    def heartbeat(self, active_tasks: int, transitions_today: int, last_poll: str) -> None:
+    def heartbeat(self, active_tasks: int, transitions_this_week: int, completed_this_week: int, last_poll: str) -> None:
         self._send(
-            f"💚 [자동화] 일일 하트비트\n"
+            f"💚 [자동화] 주간 하트비트\n"
             f"   처리 중 업무: {active_tasks}건\n"
-            f"   오늘 상태 전이: {transitions_today}건\n"
+            f"   이번 주 상태 전이: {transitions_this_week}건\n"
+            f"   이번 주 완료 업무: {completed_this_week}건\n"
             f"   마지막 폴링: {last_poll}"
         )
 

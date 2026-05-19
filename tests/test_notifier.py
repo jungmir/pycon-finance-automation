@@ -46,12 +46,14 @@ def test_handler_error_sends_webhook(notifier):
 @resp_lib.activate
 def test_heartbeat_sends_webhook(notifier):
     resp_lib.add(resp_lib.POST, WEBHOOK, body="ok", status=200)
-    notifier.heartbeat(3, 12, "2026-04-17T05:00:00")
+    notifier.heartbeat(3, 12, 2, "2026-04-17T05:00:00")
     body = resp_lib.calls[0].request.body.decode("utf-8")
     data = json.loads(body)
     text = data["text"]
     assert "3" in text   # active tasks
-    assert "12" in text  # transitions
+    assert "12" in text  # transitions this week
+    assert "2" in text   # completed this week
+    assert "주간" in text
 
 
 @resp_lib.activate

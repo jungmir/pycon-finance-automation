@@ -81,8 +81,9 @@ def run_poll(cfg: Config, store: Store, notifier: Notifier, engine: StateEngine,
 
 def send_heartbeat(store: Store, notifier: Notifier) -> None:
     active = store.count_active_tasks()
-    transitions = store.count_transitions_today()
-    notifier.heartbeat(active, transitions, _last_poll_time)
+    transitions = store.count_transitions_this_week()
+    completed = store.count_completed_tasks_this_week()
+    notifier.heartbeat(active, transitions, completed, _last_poll_time)
 
 
 def main() -> None:
@@ -97,7 +98,7 @@ def main() -> None:
     schedule.every(cfg.poll_interval_seconds).seconds.do(
         run_poll, cfg, store, notifier, engine, dooray
     )
-    schedule.every().day.at("09:00").do(send_heartbeat, store, notifier)
+    schedule.every().monday.at("18:00").do(send_heartbeat, store, notifier)
 
     run_poll(cfg, store, notifier, engine, dooray)
 
